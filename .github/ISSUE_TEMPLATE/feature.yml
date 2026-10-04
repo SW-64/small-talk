@@ -1,0 +1,34 @@
+name: 기능 추가
+description: 새로운 기능을 추가할 때 사용해요
+title: "[Feature] "
+labels: ["feature"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 무엇을 만드나요?
+      description: 추가할 기능을 한두 문장으로 적어주세요
+      placeholder: 예) 카테고리별 카드 목록을 조회하는 API
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: 할 일
+      description: 체크리스트로 나눠 적으면 진행 상황을 보기 좋아요
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 조건
+      description: 어떤 상태가 되면 이 이슈를 닫을 수 있나요?
+      placeholder: 예) GET /api/cards?date=&category= 호출 시 카드 목록이 반환된다
+  - type: textarea
+    id: notes
+    attributes:
+      label: 참고 사항
+      description: 관련 문서, 결정 사항, 링크 등
