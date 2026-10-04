@@ -1,0 +1,25 @@
+name: 작업
+description: 설정, 환경, 패키지, 문서 등 기능 외 작업에 사용해요
+title: "[Chore] "
+labels: ["chore"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 무엇을 하나요?
+      placeholder: 예) NestJS 초기 프로젝트 세팅
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: 할 일
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: 참고 사항
