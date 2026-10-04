@@ -1,0 +1,44 @@
+name: 버그 리포트
+description: 잘못 동작하는 부분을 고칠 때 사용해요
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 어떤 문제가 있나요?
+      placeholder: 예) 오전 9시 전에 조회하면 어제 카드가 나온다
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 방법
+      value: |
+        1. 
+        2. 
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 결과
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 결과
+      description: 에러 메시지나 로그가 있다면 붙여주세요
+    validations:
+      required: true
+  - type: dropdown
+    id: env
+    attributes:
+      label: 발생 환경
+      options:
+        - 로컬
+        - 개발 서버
+        - 운영 서버
+    validations:
+      required: true
