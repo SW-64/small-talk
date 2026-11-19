@@ -21,5 +21,6 @@ import { TrendIssuesService } from './trend-issues/trend-issues.service';
     GeminiClient,
     IssueCardsService,
   ],
+  exports: [TrendIssuesService],
 })
 export class NewsModule {}

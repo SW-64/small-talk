@@ -3,8 +3,8 @@ import type { ConfigType } from '@nestjs/config';
 import { naverConfig } from '../../config/configuration';
 import { rankingConfig } from '../../config/ranking.config';
 import { CallBudget } from '../common/call-budget';
-import { DatalabPeriod, fillMissingDates } from './datalab-period';
-import { DailyRatio, RankingFailureReason } from './ranking.types';
+import { DatalabPeriod } from './datalab-period';
+import { DailyRatio } from './ranking.types';
 
 export interface DatalabGroup {
   groupName: string;
@@ -14,15 +14,26 @@ export interface DatalabGroup {
 export interface DatalabRequest {
   period: DatalabPeriod;
   ages: string[];
+  anchor: string; // 모든 요청에 함께 넣는 공통 기준 키워드
 }
 
+// 기준 키워드 그룹 이름 (이슈 그룹 이름과 겹치지 않게)
+export const ANCHOR_GROUP = '__anchor__';
+
+// ratio·anchorRatio 는 period.endDate(어제) 값. 응답에 없으면 0
 export type DatalabGroupResult =
-  | { groupName: string; batch: number; status: 'ok'; data: DailyRatio[] }
+  | {
+      groupName: string;
+      batch: number;
+      status: 'ok';
+      ratio: number;
+      anchorRatio: number;
+    }
   | {
       groupName: string;
       batch: number;
       status: 'failed';
-      reason: Exclude<RankingFailureReason, 'noSearchTerm'>;
+      reason: 'apiError' | 'budgetExceeded';
     };
 
 interface DatalabResponse {
@@ -60,7 +71,8 @@ export class DatalabClient {
     private readonly config: ConfigType<typeof rankingConfig>,
   ) {}
 
-  // 그룹을 batchSize 개씩 순차 호출한다. 실패한 요청의 그룹만 failed 로 돌려주고 나머지는 계속한다
+  // 그룹을 (batchSize - 1)개씩 나눠 기준 키워드와 함께 순차 호출한다.
+  // 실패한 요청의 그룹만 failed 로 돌려주고 나머지는 계속한다
   async fetchTrends(
     groups: DatalabGroup[],
     request: DatalabRequest,
@@ -69,7 +81,7 @@ export class DatalabClient {
     const results: DatalabGroupResult[] = [];
     let budgetSkipped = 0;
 
-    const batches = chunk(groups, this.config.datalab.batchSize);
+    const batches = chunk(groups, this.config.datalab.batchSize - 1);
     for (const [index, groupsInBatch] of batches.entries()) {
       const batch = index + 1;
       const failAll = (
@@ -84,7 +96,10 @@ export class DatalabClient {
 
       try {
         const response = await this.requestWithRetry(
-          groupsInBatch,
+          [
+            ...groupsInBatch,
+            { groupName: ANCHOR_GROUP, keywords: [request.anchor] },
+          ],
           request,
           budget,
         );
@@ -127,16 +142,18 @@ export class DatalabClient {
       );
     }
 
-    const byTitle = new Map(response.results.map((r) => [r.title, r.data]));
+    // 검색이 거의 없는 날은 응답에서 빠지므로 0 으로 본다
+    const byTitle = new Map(
+      response.results.map((r) => [
+        r.title,
+        r.data.find((d) => d.period === period.endDate)?.ratio ?? 0,
+      ]),
+    );
+    const anchorRatio = byTitle.get(ANCHOR_GROUP);
     return groups.map(({ groupName }) => {
-      const data = byTitle.get(groupName);
-      return data
-        ? {
-            groupName,
-            batch,
-            status: 'ok',
-            data: fillMissingDates(data, period.dates),
-          }
+      const ratio = byTitle.get(groupName);
+      return ratio !== undefined && anchorRatio !== undefined
+        ? { groupName, batch, status: 'ok', ratio, anchorRatio }
         : { groupName, batch, status: 'failed', reason: 'apiError' };
     });
   }

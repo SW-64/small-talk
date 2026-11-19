@@ -11,7 +11,7 @@ export class DatalabTestController {
 
   @Post()
   @HttpCode(200)
-  run(@Body() { terms, ages, days }: DatalabTestRequestDto) {
-    return this.ranking.testTerms(terms, { ages, days });
+  run(@Body() { terms, ages, anchor }: DatalabTestRequestDto) {
+    return this.ranking.testTerms(terms, { ages, anchor });
   }
 }

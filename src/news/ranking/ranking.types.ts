@@ -17,34 +17,27 @@ export interface DailyRatio {
   ratio: number;
 }
 
-export type RankingFlag = 'new' | 'lowVolume' | 'rankingFailed';
+// anchorZero: 같은 요청의 기준 키워드 값이 0 이라 환산 불가
 export type RankingFailureReason =
-  'apiError' | 'budgetExceeded' | 'noSearchTerm';
+  'apiError' | 'budgetExceeded' | 'noSearchTerm' | 'anchorZero';
 
-export interface SpikeFields {
-  dailyRatios: DailyRatio[];
+// 점수 = 이슈의 어제 ratio ÷ 같은 요청 안 기준 키워드의 어제 ratio
+export interface ScoreFields {
   yesterdayRatio: number | null;
-  previousAverage: number | null;
-  spike: number | null;
-  flags: RankingFlag[];
+  anchorRatio: number | null;
+  score: number | null;
   failureReason?: RankingFailureReason;
 }
 
-export interface RankedIssue extends SpikeFields {
+export interface RankedIssue extends ScoreFields {
   id: string;
   category: string;
   representativeTitle: string;
   publisherCount: number;
   searchTerms: SearchTerm[];
-}
-
-export interface CategoryRankedIssue extends RankedIssue {
-  rank: number;
-}
-
-export interface OverallRankedIssue extends RankedIssue {
-  rank: number;
-  tier: 'top' | 'reserve';
+  categoryPosition: number; // 카테고리 안 정렬 순서 (후보 전체 기준, 1부터)
+  categoryRank: number | null; // 1~cardsPerCategory 만. 1 = Today Pick, 나머지 = 예비
+  overallRank: number | null; // 카드 이슈 안에서 1~overallTopN
 }
 
 export interface DatalabCallStats {
@@ -54,17 +47,19 @@ export interface DatalabCallStats {
 }
 
 export interface RankingResult {
-  period: { startDate: string; endDate: string };
+  date: string; // 조회한 "어제" (KST)
   ages: string[];
+  anchorKeyword: string;
   calls: DatalabCallStats;
   candidates: { total: number; ranked: number; failed: number };
-  categories: { category: string; issues: CategoryRankedIssue[] }[];
-  overall: OverallRankedIssue[];
+  // 카테고리 순서 → 카테고리 안 정렬 순서
+  issues: RankedIssue[];
 }
 
 export interface DatalabTestResult {
-  period: { startDate: string; endDate: string };
+  date: string;
   ages: string[];
+  anchorKeyword: string;
   calls: DatalabCallStats;
-  results: (SpikeFields & { term: string; batch: number })[];
+  results: (ScoreFields & { term: string; batch: number })[];
 }

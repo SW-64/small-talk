@@ -4,6 +4,7 @@ import {
   DatalabClient,
   DatalabGroup,
   DatalabGroupResult,
+  DatalabRequest,
 } from './datalab.client';
 import { RankingService } from './ranking.service';
 import { RankingIssueInput } from './ranking.types';
@@ -23,15 +24,13 @@ const issue = (
   titles: [`${id}키워드 소식`, `${id}키워드 소식`],
 });
 
-const ok = (groupName: string, yesterday: number, batch = 1) =>
+const ok = (groupName: string, ratio: number, anchorRatio = 10, batch = 1) =>
   ({
     groupName,
     batch,
     status: 'ok',
-    data: [
-      { period: '2026-11-06', ratio: 10 },
-      { period: '2026-11-07', ratio: yesterday },
-    ],
+    ratio,
+    anchorRatio,
   }) satisfies DatalabGroupResult;
 
 const failed = (groupName: string) =>
@@ -43,7 +42,10 @@ const failed = (groupName: string) =>
   }) satisfies DatalabGroupResult;
 
 describe('RankingService', () => {
-  let fetchTrends: jest.Mock<Promise<DatalabGroupResult[]>, [DatalabGroup[]]>;
+  let fetchTrends: jest.Mock<
+    Promise<DatalabGroupResult[]>,
+    [DatalabGroup[], DatalabRequest]
+  >;
   let service: RankingService;
 
   const respond = (results: DatalabGroupResult[]) =>
@@ -51,7 +53,10 @@ describe('RankingService', () => {
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
-    fetchTrends = jest.fn<Promise<DatalabGroupResult[]>, [DatalabGroup[]]>();
+    fetchTrends = jest.fn<
+      Promise<DatalabGroupResult[]>,
+      [DatalabGroup[], DatalabRequest]
+    >();
     const config = rankingConfig();
     service = new RankingService(
       { fetchTrends } as unknown as DatalabClient,
@@ -62,51 +67,58 @@ describe('RankingService', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('카테고리별로 spike 내림차순, 동점이면 언론사 수 내림차순이다', async () => {
-    respond([ok('a', 10), ok('b', 40), ok('c', 40)]);
-    const result = await service.rank(
-      [issue('a', 'tech'), issue('b', 'tech', 2), issue('c', 'tech', 9)],
-      { referenceTime: REFERENCE },
-    );
-    expect(result.categories[0].issues.map((i) => [i.rank, i.id])).toEqual([
-      [1, 'c'],
-      [2, 'b'],
-      [3, 'a'],
+  it('어제 하루를 설정의 기준 키워드와 함께 조회한다', async () => {
+    respond([ok('a', 10)]);
+    const result = await service.rank([issue('a', 'tech')], {
+      referenceTime: REFERENCE,
+    });
+    const [groups, request] = fetchTrends.mock.calls[0];
+    expect(groups).toEqual([
+      { groupName: 'a', keywords: ['a키워드 소식', 'a키워드', '소식'] },
     ]);
+    expect(request.anchor).toBe('날씨');
+    expect(request.period.startDate).toBe('2026-11-07');
+    expect(request.period.endDate).toBe('2026-11-07');
+    expect(result.date).toBe('2026-11-07');
   });
 
-  it('요청이 달라도 이슈 자신의 값으로만 spike 를 계산한다', async () => {
-    // b 는 다른 요청이라 ratio 절대값이 작지만 자기 평균 대비 상승폭은 같다
-    fetchTrends.mockResolvedValue([
-      ok('a', 40, 1),
-      {
-        groupName: 'b',
-        batch: 2,
-        status: 'ok',
-        data: [
-          { period: '2026-11-06', ratio: 1 },
-          { period: '2026-11-07', ratio: 4 },
-        ],
-      },
-    ]);
+  it('점수는 어제 ratio ÷ 같은 요청의 기준 키워드 ratio 이다', async () => {
+    // a 는 요청 안 절대값이 크지만 기준 대비로 환산하면 b 가 더 많이 검색됐다
+    respond([ok('a', 100, 50, 1), ok('b', 40, 10, 2)]);
     const result = await service.rank(
       [issue('a', 'tech'), issue('b', 'tech')],
       { referenceTime: REFERENCE },
     );
-    expect(result.categories[0].issues.map((i) => i.spike)).toEqual([4, 4]);
+    expect(result.issues.map((i) => [i.id, i.score, i.categoryRank])).toEqual([
+      ['b', 4, 1],
+      ['a', 2, 2],
+    ]);
   });
 
-  it('호출 실패 이슈는 spike null 과 플래그를 달고 뒤에 언론사 수 순으로 둔다', async () => {
+  it('기준 키워드 값이 0 이면 점수 없이 anchorZero 로 뒤에 둔다', async () => {
+    respond([ok('a', 30, 0), ok('b', 1, 10)]);
+    const result = await service.rank(
+      [issue('a', 'tech'), issue('b', 'tech')],
+      { referenceTime: REFERENCE },
+    );
+    expect(result.issues.map((i) => i.id)).toEqual(['b', 'a']);
+    expect(result.issues[1]).toMatchObject({
+      score: null,
+      yesterdayRatio: 30,
+      anchorRatio: 0,
+      failureReason: 'anchorZero',
+    });
+  });
+
+  it('호출 실패 이슈는 점수 없이 뒤에 언론사 수 순으로 두고 집계한다', async () => {
     respond([failed('a'), ok('b', 1), failed('c')]);
     const result = await service.rank(
       [issue('a', 'tech', 3), issue('b', 'tech', 2), issue('c', 'tech', 8)],
       { referenceTime: REFERENCE },
     );
-    const issues = result.categories[0].issues;
-    expect(issues.map((i) => i.id)).toEqual(['b', 'c', 'a']);
-    expect(issues[1]).toMatchObject({
-      spike: null,
-      flags: ['rankingFailed'],
+    expect(result.issues.map((i) => i.id)).toEqual(['b', 'c', 'a']);
+    expect(result.issues[1]).toMatchObject({
+      score: null,
       failureReason: 'apiError',
     });
     expect(result.candidates).toEqual({ total: 3, ranked: 1, failed: 2 });
@@ -119,61 +131,50 @@ describe('RankingService', () => {
       { referenceTime: REFERENCE },
     );
     expect(fetchTrends.mock.calls[0][0]).toEqual([]);
-    expect(result.categories[0].issues[0]).toMatchObject({
+    expect(result.issues[0]).toMatchObject({
       failureReason: 'noSearchTerm',
       searchTerms: [],
     });
   });
 
-  it('이슈 하나를 검색어 묶음 하나로 요청한다', async () => {
-    respond([ok('a', 10)]);
-    await service.rank([issue('a', 'tech')], { referenceTime: REFERENCE });
-    expect(fetchTrends.mock.calls[0][0]).toEqual([
-      { groupName: 'a', keywords: ['a키워드 소식', 'a키워드', '소식'] },
-    ]);
-  });
-
-  it('전체 순위는 카테고리를 합쳐 상위 15개이고 10위까지 top 이다', async () => {
-    const issues = Array.from({ length: 20 }, (_, i) =>
-      issue(`i${i}`, i % 2 ? 'tech' : 'economy'),
+  it('카테고리 4위까지 카드 이슈이고 랭킹은 그 안에서 15개까지다', async () => {
+    const issues = Array.from({ length: 30 }, (_, i) =>
+      issue(
+        `i${i}`,
+        ['economy', 'tech', 'culture', 'society', 'environment'][i % 5],
+      ),
     );
     respond(issues.map((item, i) => ok(item.id, i + 1)));
 
     const result = await service.rank(issues, { referenceTime: REFERENCE });
 
-    expect(result.overall).toHaveLength(15);
-    expect(result.overall[0]).toMatchObject({
-      id: 'i19',
-      rank: 1,
-      tier: 'top',
-    });
-    expect(result.overall[9].tier).toBe('top');
-    expect(result.overall[10].tier).toBe('reserve');
-    expect(result.categories.map((c) => c.category)).toEqual([
-      'economy',
-      'tech',
-    ]);
+    const cards = result.issues.filter((i) => i.categoryRank !== null);
+    expect(cards).toHaveLength(20);
+    const ranked = result.issues.filter((i) => i.overallRank !== null);
+    expect(ranked).toHaveLength(15);
+    expect(ranked.every((i) => i.categoryRank !== null)).toBe(true);
+    expect(result.issues.find((i) => i.overallRank === 1)?.id).toBe('i29');
   });
 
-  it('testTerms 는 검색어별 일별 값과 spike 를 돌려준다', async () => {
-    respond([ok('첫눈', 40, 1)]);
+  it('testTerms 는 기준 키워드를 바꿔 검색어별 점수를 돌려준다', async () => {
+    respond([ok('첫눈', 40, 20)]);
     const result = await service.testTerms(
       ['첫눈'],
-      { ages: ['5'], days: 2 },
+      { ages: ['5'], anchor: '로또' },
       REFERENCE,
     );
-    expect(result.ages).toEqual(['5']);
-    expect(result.period).toEqual({
-      startDate: '2026-11-06',
-      endDate: '2026-11-07',
+    expect(fetchTrends.mock.calls[0][1].anchor).toBe('로또');
+    expect(result).toMatchObject({
+      date: '2026-11-07',
+      ages: ['5'],
+      anchorKeyword: '로또',
     });
     expect(result.results[0]).toMatchObject({
       term: '첫눈',
       batch: 1,
       yesterdayRatio: 40,
-      previousAverage: 10,
-      spike: 4,
-      flags: [],
+      anchorRatio: 20,
+      score: 2,
     });
   });
 });

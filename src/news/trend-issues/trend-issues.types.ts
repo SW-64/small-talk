@@ -142,3 +142,10 @@ export interface TrendIssuesResult {
   categories: CategoryResult[];
   ranking?: RankingResult & { droppedByFlags: number };
 }
+
+// 일일 수집용 결과: 랭킹 id(RankedIssue.id) → 랭킹 후보 묶음
+export interface CollectAndRankResult {
+  window: TimeWindow;
+  ranking: RankingResult & { droppedByFlags: number };
+  candidates: Map<string, IssueCluster>;
+}

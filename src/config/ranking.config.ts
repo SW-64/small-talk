@@ -1,25 +1,24 @@
 import { registerAs } from '@nestjs/config';
 
-// 검색량 기반 랭킹 설정 — 임계값과 검색어 규칙은 실험하며 여기서만 바꾼다
+// 어제 검색량 기반 랭킹 설정 — 임계값과 검색어 규칙은 실험하며 여기서만 바꾼다
 export const rankingConfig = registerAs('ranking', () => ({
   ages: ['4', '5', '6'], // 데이터랩 연령 코드: 25~39세
-  days: 8, // 어제 포함 최근 8일
+
+  // 공통 기준 키워드: 모든 데이터랩 요청에 함께 넣어, 이슈 점수를 "기준 키워드 대비 어제 검색 비율"로 환산한다.
+  // 요청마다 상대값(최대 100)이라 요청끼리 비교하려면 같은 기준이 필요하다. 실제 값을 보고 바꿀 것
+  anchorKeyword: '날씨',
 
   datalab: {
-    batchSize: 5, // 데이터랩 keywordGroups 상한
+    batchSize: 5, // 데이터랩 keywordGroups 상한 (기준 키워드 1칸 포함 → 요청당 이슈 4개)
     maxDatalabCallsPerRun: 50, // 재시도를 포함한 실행당 실제 HTTP 요청 수 상한
     maxRetries: 3,
     retryBaseMs: 500,
     timeoutMs: 5000,
   },
 
-  spike: {
-    zeroBaselineRatio: 1, // 이전 평균이 0일 때 분모로 쓰는 값
-    minYesterdayRatio: 5, // 어제 ratio 가 이 값 미만이면 lowVolume 표시
-  },
-
-  overallTopN: 15,
-  overallPrimaryN: 10, // 전체 순위에서 이 순위까지 top, 나머지는 reserve
+  cardsPerCategory: 4, // 카테고리 순위 1 = Today Pick, 2~4 = 예비 이슈
+  overallTopN: 15, // 랭킹은 카드 이슈 안에서 상위 15개 (1~10 TOP, 11~15 예비)
+  overallPrimaryN: 10,
 
   searchTerms: {
     maxTerms: 3,

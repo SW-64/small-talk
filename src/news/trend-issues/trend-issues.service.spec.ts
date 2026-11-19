@@ -217,5 +217,17 @@ describe('TrendIssuesService', () => {
       expect(referenceTime).toEqual(new Date('2026-10-28T06:00:00+09:00'));
       expect(result.ranking?.droppedByFlags).toBe(1);
     });
+
+    it('collectAndRank 는 랭킹 id 로 후보 묶음을 찾을 수 있게 돌려준다', async () => {
+      const { window, candidates } = await service.collectAndRank({}, NOW);
+
+      expect(rank).toHaveBeenCalledTimes(1);
+      expect([...candidates.keys()]).toEqual(['tech-1']);
+      expect(candidates.get('tech-1')?.articles.map((a) => a.title)).toEqual([
+        TITLE,
+        TITLE,
+      ]);
+      expect(window.end).toEqual(new Date('2026-10-28T06:00:00+09:00'));
+    });
   });
 });

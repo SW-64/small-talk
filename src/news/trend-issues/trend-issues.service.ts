@@ -17,6 +17,7 @@ import { buildIssueClusters, selectTopIssues } from './rank';
 import { formatSummary } from './summary';
 import {
   CategoryResult,
+  CollectAndRankResult,
   IssueCluster,
   KeywordStats,
   KeywordTarget,
@@ -51,6 +52,33 @@ export class TrendIssuesService {
     options: TrendIssuesRunOptions = {},
     now = new Date(),
   ): Promise<TrendIssuesResult> {
+    return (await this.execute(options, now)).result;
+  }
+
+  /**
+   * 일일 수집용: 전날 06시 ~ 당일 06시 수집 → 데이터랩 랭킹까지 실행하고,
+   * DB 저장에 필요한 랭킹 후보 묶음(랭킹 id → 묶음)을 함께 돌려준다
+   */
+  async collectAndRank(
+    options: Pick<TrendIssuesRunOptions, 'date'> = {},
+    now = new Date(),
+  ): Promise<CollectAndRankResult> {
+    const { result, window, candidates } = await this.execute(
+      { date: options.date, window: 'previousDay', ranking: 'datalab' },
+      now,
+    );
+    if (!result.ranking) throw new Error('랭킹 결과가 없습니다');
+    return { window, ranking: result.ranking, candidates };
+  }
+
+  private async execute(
+    options: TrendIssuesRunOptions,
+    now: Date,
+  ): Promise<{
+    result: TrendIssuesResult;
+    window: TimeWindow;
+    candidates: Map<string, IssueCluster>;
+  }> {
     const windowType = options.window ?? 'previousDay';
     const window = this.resolveWindow(windowType, options.date, now);
     const categories = this.resolveCategories(options.categories);
@@ -181,8 +209,9 @@ export class TrendIssuesService {
     for (const line of formatSummary(result)) this.logger.log(line);
 
     // [6] 랭킹 (선택)
+    const candidates = new Map<string, IssueCluster>();
     if (options.ranking === 'datalab') {
-      const { inputs, droppedByFlags } = this.buildRankingInputs(
+      const { inputs, clusters, droppedByFlags } = this.buildRankingInputs(
         selections.map((s) => s.qualified),
       );
       this.logger.log(
@@ -192,9 +221,10 @@ export class TrendIssuesService {
         referenceTime: window.end,
       });
       result.ranking = { ...ranking, droppedByFlags };
+      inputs.forEach((input, i) => candidates.set(input.id, clusters[i]));
     }
 
-    return result;
+    return { result, window, candidates };
   }
 
   // 플래그 없는 묶음을 카테고리별 언론사 수 순으로 최대 N개 (qualified 는 이미 정렬됨)
@@ -202,18 +232,24 @@ export class TrendIssuesService {
     const limit = this.config.selection.rankingCandidatesPerCategory;
     let droppedByFlags = 0;
 
-    const inputs = qualifiedByCategory.flatMap((qualified) => {
+    const clusters = qualifiedByCategory.flatMap((qualified) => {
       const clean = qualified.filter((c) => !c.excluded && !c.marketReport);
       droppedByFlags += qualified.length - clean.length;
-      return clean.slice(0, limit).map((cluster, index): RankingIssueInput => ({
-        id: `${cluster.category}-${index + 1}`,
+      return clean.slice(0, limit);
+    });
+    const perCategory = new Map<string, number>();
+    const inputs = clusters.map((cluster): RankingIssueInput => {
+      const index = (perCategory.get(cluster.category) ?? 0) + 1;
+      perCategory.set(cluster.category, index);
+      return {
+        id: `${cluster.category}-${index}`,
         category: cluster.category,
         representativeTitle: cluster.representativeTitle,
         publisherCount: cluster.publisherCount,
         titles: cluster.articles.map((a) => a.title),
-      }));
+      };
     });
-    return { inputs, droppedByFlags };
+    return { inputs, clusters, droppedByFlags };
   }
 
   private resolveWindow(

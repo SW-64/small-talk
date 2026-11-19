@@ -1,4 +1,4 @@
-import { computeDatalabPeriod, fillMissingDates } from './datalab-period';
+import { computeDatalabPeriod } from './datalab-period';
 
 const kst = (iso: string) => new Date(`${iso}+09:00`);
 
@@ -21,27 +21,18 @@ describe('computeDatalabPeriod', () => {
     expect(period.endDate).toBe('2026-11-06');
   });
 
+  it('1일이면 어제 하루다', () => {
+    const period = computeDatalabPeriod(kst('2026-11-08T06:00:00'), 1);
+    expect(period).toEqual({
+      startDate: '2026-11-07',
+      endDate: '2026-11-07',
+      dates: ['2026-11-07'],
+    });
+  });
+
   it('월·연 경계를 넘는다', () => {
     const period = computeDatalabPeriod(kst('2026-01-02T12:00:00'), 8);
     expect(period.startDate).toBe('2025-12-25');
     expect(period.endDate).toBe('2026-01-01');
-  });
-});
-
-describe('fillMissingDates', () => {
-  const dates = ['2026-11-05', '2026-11-06', '2026-11-07'];
-
-  it('빠진 날짜를 0 으로 채운다', () => {
-    expect(
-      fillMissingDates([{ period: '2026-11-06', ratio: 12.5 }], dates),
-    ).toEqual([
-      { period: '2026-11-05', ratio: 0 },
-      { period: '2026-11-06', ratio: 12.5 },
-      { period: '2026-11-07', ratio: 0 },
-    ]);
-  });
-
-  it('데이터가 전혀 없으면 모두 0 이다', () => {
-    expect(fillMissingDates([], dates).map((d) => d.ratio)).toEqual([0, 0, 0]);
   });
 });

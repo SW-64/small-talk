@@ -5,12 +5,9 @@ import {
   ArrayUnique,
   IsArray,
   IsIn,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
-  Max,
-  Min,
 } from 'class-validator';
 
 const AGE_CODES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'];
@@ -18,7 +15,7 @@ const AGE_CODES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'];
 export class DatalabTestRequestDto {
   @ApiProperty({
     description:
-      '조회할 검색어. 5개씩 나눠 요청하며 다른 요청끼리 ratio 는 비교 불가',
+      '조회할 검색어. 4개씩 나눠 기준 키워드와 함께 요청하고, 기준 키워드 대비 어제 점수로 비교한다',
     example: ['사이버트럭', '첫눈'],
     type: [String],
   })
@@ -41,14 +38,12 @@ export class DatalabTestRequestDto {
   ages?: string[];
 
   @ApiPropertyOptional({
-    description: '어제 포함 조회 일수',
-    default: 8,
-    minimum: 2,
-    maximum: 90,
+    description:
+      '공통 기준 키워드. 생략하면 설정값. 기준 키워드 후보를 비교할 때 바꿔 본다',
+    example: '날씨',
   })
   @IsOptional()
-  @IsInt()
-  @Min(2)
-  @Max(90)
-  days?: number;
+  @IsString()
+  @IsNotEmpty()
+  anchor?: string;
 }

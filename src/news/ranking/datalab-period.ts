@@ -1,5 +1,3 @@
-import { DailyRatio } from './ranking.types';
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -24,16 +22,4 @@ export function computeDatalabPeriod(
     new Date(today - (days - i) * DAY_MS).toISOString().slice(0, 10),
   );
   return { startDate: dates[0], endDate: dates[days - 1], dates };
-}
-
-// 검색이 거의 없는 날은 응답에서 빠지므로 ratio 0 으로 채운다
-export function fillMissingDates(
-  data: DailyRatio[],
-  dates: string[],
-): DailyRatio[] {
-  const byPeriod = new Map(data.map((d) => [d.period, d.ratio]));
-  return dates.map((period) => ({
-    period,
-    ratio: byPeriod.get(period) ?? 0,
-  }));
 }

@@ -1,11 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { rankingConfig } from '../../config/ranking.config';
 import { CallBudget } from '../common/call-budget';
-import { DatalabClient, DatalabGroup } from './datalab.client';
+import { ANCHOR_GROUP, DatalabClient, DatalabGroup } from './datalab.client';
 import { computeDatalabPeriod } from './datalab-period';
 
-const period = computeDatalabPeriod(new Date('2026-11-08T12:00:00+09:00'), 8);
-const request = { period, ages: ['4', '5', '6'] };
+const period = computeDatalabPeriod(new Date('2026-11-08T12:00:00+09:00'), 1);
+const request = { period, ages: ['4', '5', '6'], anchor: '날씨' };
 const NAVER = {
   keyId: 'id',
   key: 'key',
@@ -29,7 +29,7 @@ const groups = (count: number): DatalabGroup[] =>
 
 const status = (code: number) => new Response('{}', { status: code });
 
-// 요청받은 그룹마다 어제 값을 돌려주는 정상 응답
+// 요청받은 그룹마다 어제 값(기준 키워드 25, 나머지 50)을 돌려주는 정상 응답
 const echo = (_url: string, init: RequestInit) => {
   const body = JSON.parse(init.body as string) as RequestBody;
   return Promise.resolve(
@@ -37,7 +37,12 @@ const echo = (_url: string, init: RequestInit) => {
       JSON.stringify({
         results: body.keywordGroups.map(({ groupName }) => ({
           title: groupName,
-          data: [{ period: period.endDate, ratio: 50 }],
+          data: [
+            {
+              period: period.endDate,
+              ratio: groupName === ANCHOR_GROUP ? 25 : 50,
+            },
+          ],
         })),
       }),
       { status: 200 },
@@ -68,17 +73,38 @@ describe('DatalabClient', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('그룹을 5개씩 묶어 요청 수를 집계한다', async () => {
+  it('이슈를 4개씩 묶고 요청마다 기준 키워드를 넣는다', async () => {
     fetchMock.mockImplementation(echo);
     const budget = new CallBudget(50);
 
-    const results = await client.fetchTrends(groups(12), request, budget);
+    const results = await client.fetchTrends(groups(10), request, budget);
 
-    expect(bodies().map((b) => b.keywordGroups.length)).toEqual([5, 5, 2]);
+    expect(bodies().map((b) => b.keywordGroups.length)).toEqual([5, 5, 3]);
+    expect(
+      bodies().every((b) =>
+        b.keywordGroups.some(
+          (g) => g.groupName === ANCHOR_GROUP && g.keywords[0] === '날씨',
+        ),
+      ),
+    ).toBe(true);
     expect(budget.used).toBe(3);
-    expect(results.map((r) => r.batch)).toEqual([
-      1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3,
-    ]);
+    expect(results.map((r) => r.batch)).toEqual([1, 1, 1, 1, 2, 2, 2, 2, 3, 3]);
+  });
+
+  it('이슈와 기준 키워드의 어제 값을 돌려준다', async () => {
+    fetchMock.mockImplementation(echo);
+    const [result] = await client.fetchTrends(
+      groups(1),
+      request,
+      new CallBudget(50),
+    );
+    expect(result).toEqual({
+      groupName: 'issue-1',
+      batch: 1,
+      status: 'ok',
+      ratio: 50,
+      anchorRatio: 25,
+    });
   });
 
   it('요청 본문과 헤더를 명세대로 보낸다', async () => {
@@ -94,23 +120,55 @@ describe('DatalabClient', () => {
       'Content-Type': 'application/json',
     });
     expect(bodies()[0]).toEqual({
-      startDate: '2026-10-31',
+      startDate: '2026-11-07',
       endDate: '2026-11-07',
       timeUnit: 'date',
-      keywordGroups: groups(1),
+      keywordGroups: [
+        ...groups(1),
+        { groupName: ANCHOR_GROUP, keywords: ['날씨'] },
+      ],
       ages: ['4', '5', '6'],
     });
   });
 
-  it('응답에서 빠진 날짜를 0 으로 채운다', async () => {
-    fetchMock.mockImplementation(echo);
+  it('응답에서 어제 값이 빠진 그룹은 0 으로 본다', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          results: [
+            { title: 'issue-1', data: [] },
+            {
+              title: ANCHOR_GROUP,
+              data: [{ period: period.endDate, ratio: 30 }],
+            },
+          ],
+        }),
+      ),
+    );
     const [result] = await client.fetchTrends(
       groups(1),
       request,
       new CallBudget(50),
     );
-    if (result.status !== 'ok') throw new Error('성공 결과여야 함');
-    expect(result.data.map((d) => d.ratio)).toEqual([0, 0, 0, 0, 0, 0, 0, 50]);
+    expect(result).toMatchObject({ status: 'ok', ratio: 0, anchorRatio: 30 });
+  });
+
+  it('응답에 기준 키워드가 없으면 그 요청의 이슈는 apiError 이다', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          results: [
+            { title: 'issue-1', data: [{ period: period.endDate, ratio: 9 }] },
+          ],
+        }),
+      ),
+    );
+    const [result] = await client.fetchTrends(
+      groups(1),
+      request,
+      new CallBudget(50),
+    );
+    expect(result).toMatchObject({ status: 'failed', reason: 'apiError' });
   });
 
   it('429·5xx 는 재시도하며 재시도도 호출 수에 포함한다', async () => {
@@ -136,17 +194,17 @@ describe('DatalabClient', () => {
       .mockImplementation(echo);
 
     const results = await client.fetchTrends(
-      groups(6),
+      groups(5),
       request,
       new CallBudget(50),
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(5);
-    expect(results.slice(0, 5).map((r) => r.status)).toEqual(
-      Array(5).fill('failed'),
+    expect(results.slice(0, 4).map((r) => r.status)).toEqual(
+      Array(4).fill('failed'),
     );
     expect(results[0]).toMatchObject({ reason: 'apiError' });
-    expect(results[5].status).toBe('ok');
+    expect(results[4].status).toBe('ok');
   });
 
   it('그 밖의 4xx 는 재시도하지 않는다', async () => {
@@ -167,10 +225,10 @@ describe('DatalabClient', () => {
     const results = await client.fetchTrends(groups(12), request, budget);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(results.slice(5).every((r) => r.status === 'failed')).toBe(true);
-    expect(results[5]).toMatchObject({ reason: 'budgetExceeded' });
+    expect(results.slice(4).every((r) => r.status === 'failed')).toBe(true);
+    expect(results[4]).toMatchObject({ reason: 'budgetExceeded' });
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('이슈 7개'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('이슈 8개'));
   });
 
   it('어제 데이터가 어느 그룹에도 없으면 경고한다', async () => {
