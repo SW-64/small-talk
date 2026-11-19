@@ -32,7 +32,8 @@ npm run start:dev
 | `DATABASE_SSL` | `true`면 SSL 적용(Supabase 등), `false`면 미적용(로컬 Docker 등) — 기본 `true` |
 | `SWAGGER_ENABLED` | Swagger 문서 노출 여부 — 기본 `false` (운영 환경에서는 꺼둘 것) |
 | `ALLOWED_ORIGINS` | CORS 허용 origin 목록(콤마 구분) — 비어있으면 전체 거부 |
-| `NAVER_APIHUB_KEY_ID`, `NAVER_APIHUB_KEY` | NAVER API HUB 뉴스 검색용 키 (아직 연동 안 됨) |
+| `NAVER_APIHUB_KEY_ID`, `NAVER_APIHUB_KEY` | NAVER API HUB 뉴스 검색용 키 |
+| `GOOGLE_API_KEY`, `GEMINI_MODEL` | 이슈 카드 생성용 Gemini 키 / 모델 (모델 생략 시 `gemini-3.8-flash`) |
 
 ## 스크립트
 

@@ -20,3 +20,10 @@ export const corsConfig = registerAs('cors', () => ({
 export const swaggerConfig = registerAs('swagger', () => ({
   enabled: process.env.SWAGGER_ENABLED === 'true',
 }));
+
+export const naverConfig = registerAs('naver', () => ({
+  keyId: process.env.NAVER_APIHUB_KEY_ID ?? '',
+  key: process.env.NAVER_APIHUB_KEY ?? '',
+  newsUrl: 'https://naverapihub.apigw.ntruss.com/search/v1/news',
+  datalabUrl: 'https://naverapihub.apigw.ntruss.com/search-trend/v1/search',
+}));

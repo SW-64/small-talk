@@ -15,6 +15,10 @@ export const envValidationSchema = Joi.object({
 
   ALLOWED_ORIGINS: Joi.string().allow('').default(''),
 
-  NAVER_APIHUB_KEY_ID: Joi.string().allow('').default(''),
-  NAVER_APIHUB_KEY: Joi.string().allow('').default(''),
+  NAVER_APIHUB_KEY_ID: Joi.string().required(),
+  NAVER_APIHUB_KEY: Joi.string().required(),
+
+  // 개발용 이슈 카드 생성(Gemini)에서만 사용 — 없으면 해당 엔드포인트만 실패
+  GOOGLE_API_KEY: Joi.string().allow('').default(''),
+  GEMINI_MODEL: Joi.string().allow('').default(''),
 });
