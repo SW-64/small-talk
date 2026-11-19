@@ -5,33 +5,65 @@
 ## 작업 규칙
 
 - 이 프로젝트에서 AI 어시스턴트와 작업할 때 질문, 선택지, 계획 설명은 모두 **한국어**로 작성한다.
+- **제품 요구사항의 기준은 [`docs/PRD.md`](docs/PRD.md)다.** 작업 전에 반드시 읽고, 기존 코드나 이 파일의 내용이 PRD와 충돌하면 PRD를 따른다. 단, 충돌을 발견하면 임의로 코드를 고치기 전에 사용자에게 알린다.
+- 2026-11-19에 PRD 기준으로 설계를 처음부터 다시 잡기로 했다. 그 이전에 만든 코드(`src/news/`, `src/cards/`, `src/database/entities/`, 마이그레이션 등)는 **참고용 초안**이며, PRD와 맞지 않는 부분은 재설계 대상이다.
+- PRD에 없거나 PRD가 모호한 부분은 아래 "미정 사항"에 적고, 임의로 결정하지 말고 사용자에게 묻는다.
 
 ## 프로젝트 개요
 
-Smalltalk Today — 뉴스를 수집해 카테고리별(경제·테크·문화·사회·환경) 스몰토크 카드를 제공하는 서비스. 매일 새벽 뉴스 수집 → AI 요약·스몰토크 생성을 자동 실행하고, 프론트엔드는 카드 조회 API만 사용한다.
+Smalltalk Today — 오늘의 뉴스를 20-30대 직장인이 바로 쓸 수 있는 스몰토크 문장으로 바꿔주는 웹앱(MVP). 이 리포지토리는 백엔드다. 상세 요구사항은 `docs/PRD.md`.
+
+일일 파이프라인 요약 (KST, 휴일 포함 매일):
+- **06:00** 수집: 카테고리별 고정 검색어로 네이버 뉴스 API 수집(제목·발췌문·링크만, 본문 크롤링 금지, 범위 전날 06:00 ~ 당일 06:00) → 제목에서 후보 키워드 추출 → 데이터랩으로 검색량 순위 산정 → AI 사실 추출·카테고리 분류·랭킹 헤드라인 작성 → 구글 시트 업로드 (07:00 전 완료)
+- **07:00** 사람이 구글 시트에서 사실·헤드라인·카테고리 검수
+- **08:00 전** 승인된 사실만 가져와 AI로 3줄 요약 + 스몰토크 표현 4개 생성, 관련 기사(최대 3건) 구성 → **08:00 오픈**. 08:00 전 접속 시 전날 콘텐츠 표시
+- 사용자 요청 시 실시간 AI 생성 없음(다른 표현·다른 이슈는 모두 미리 만든 것으로 교체)
 
 ## 결정된 사항
 
+### PRD에서 온 결정
+
+- **카테고리**: 경제·테크·문화·사회·환경 5개.
+- **카드 구성**: 카테고리마다 검색량 1위 = Today Pick 카드, 2~4위 = 예비 이슈 3개(다 쓰면 처음으로 순환). 랭킹 TOP 10 이슈도 카드를 만들고, 카테고리 카드와 같은 이슈면 같은 카드를 공유. 랭킹 예비 5개(11~15위)는 TOP 10에서 제외된 자리를 채울 때만 카드 생성.
+- **카드 내용**: 3줄 요약(한 줄 40자 안쪽), 스몰토크 표현 4개(기본 1 + 다른 표현 3, 부드러운 존댓말·2줄 이내·브랜드 홍보 금지), 관련 기사 최대 3건(사용된 승인 사실이 많은 기사 순, 같으면 최신 발행 순; 기사 제목·원문 링크·발행 시각).
+- **제외 주제**: 정치, 종교, 젠더, 혐오, 사건·사고(사망, 범죄, 재난).
+- **AI 호출 분리**: 사실 추출(+카테고리 분류, 랭킹 헤드라인)과 요약·스몰토크 생성은 별도 호출. 생성 단계에는 사람이 승인한 사실만 전달.
+- **랭킹**: 네이버 데이터랩 검색어트렌드 API, 집계 기간 전날 하루, 매 요청에 공통 기준 키워드를 넣어 비율로 환산, 하루 1회 갱신, 상위 15개 검수.
+- **사실 검수 도구**: 구글 시트(AI 추출 결과 업로드 → 승인·수정된 사실만 다시 가져옴). 고정 검색어 목록·변경 이력도 시트의 '검색어 목록' 탭에서 관리.
+- **문장 저장**: 프론트엔드 localStorage(최대 50개). 백엔드 저장 없음, 로그인 없음.
+- **랭킹·카드 응답**: 첫 화면은 사전 생성된 콘텐츠를 조회만 하므로 3초 이내 표시가 목표.
+
+### 기술 기반 (PRD 이전 결정, 유지)
+
 - **프레임워크**: NestJS
 - **DB**: Supabase(PostgreSQL). `supabase-js`는 사용하지 않고 PostgreSQL 연결 문자열로 직접 연결.
-- **DB 연결 도구**: TypeORM (`@nestjs/typeorm` + `typeorm` + `pg`). jsonb/timestamptz 컬럼 타입과 `@Check()` 데코레이터로 CHECK 제약을 엔티티 자체에 선언할 수 있다는 점, `@nestjs/typeorm`의 Nest 공식 통합을 기준으로 Prisma/Drizzle/raw pg 대비 채택. 현재는 **연결 레이어만** 구성되어 있고 엔티티/테이블은 아직 없음(아래 미정 사항 참고).
-- **테이블**: `cards`, `articles` (snake_case, 시간 컬럼은 timestamptz, summary는 jsonb) — 단, 구체적인 컬럼/제약/관계는 아직 미정(아래 참고).
-- **DB SSL**: `DATABASE_SSL` 환경변수(boolean, 기본 `true`)로 on/off. true면 `ssl: { rejectUnauthorized: false }` 적용(Supabase 등), false면 ssl 미적용(로컬 Docker PostgreSQL 등). `database.module.ts`와 `data-source.ts` 양쪽에 동일 적용.
+- **DB 연결 도구**: TypeORM (`@nestjs/typeorm` + `typeorm` + `pg`).
+- **로컬 DB**: Docker 컨테이너 `smalltalk-db`(postgres:16, 호스트 포트 5433).
+- **DB SSL**: `DATABASE_SSL` 환경변수(boolean, 기본 `true`)로 on/off. true면 `ssl: { rejectUnauthorized: false }`, false면 ssl 미적용. `database.module.ts`와 `data-source.ts` 양쪽에 동일 적용.
 - **마이그레이션**: TypeORM 마이그레이션만 사용, `synchronize: false` 항상 유지(운영 DB 자동 동기화 금지).
-- **뉴스 소스**: NAVER API HUB 뉴스 검색(`https://naverapihub.apigw.ntruss.com/search/v1/news`), 헤더 `X-NCP-APIGW-API-KEY-ID` / `X-NCP-APIGW-API-KEY`. 환경변수명은 `NAVER_APIHUB_KEY_ID` / `NAVER_APIHUB_KEY` (아직 연동 로직 없음, placeholder만 존재).
-- **공개 API** (Global Prefix: `/api`):
-  - `GET /cards?date=&category=`
-  - `POST /cards/:id/regenerate` ← 구현 시 요청 횟수 제한 필수(아직 미구현)
+- **네이버 API**: NAVER API HUB(`naverapihub.apigw.ntruss.com`), 헤더 `X-NCP-APIGW-API-KEY-ID` / `X-NCP-APIGW-API-KEY`, 환경변수 `NAVER_APIHUB_KEY_ID` / `NAVER_APIHUB_KEY`. 뉴스 검색은 `/search/v1/news`.
+- **AI 모델**: Google Gemini 무료 등급, `gemini-3.8-flash` (REST `generateContent` 직접 호출, SDK 미사용). 환경변수 `GOOGLE_API_KEY`, 모델 변경은 `GEMINI_MODEL`. 무료 등급 분당 한도를 고려한 요청 간격 필요.
 - **전역 설정**: `ValidationPipe({ whitelist, forbidNonWhitelisted, transform })`, Global Prefix `/api`.
-- **Swagger**: `SWAGGER_ENABLED` 환경변수로 on/off, **코드 기본값은 `false`**(운영 환경 안전 기본값). `/api/docs`에 마운트.
-- **CORS**: 허용 origin은 `ALLOWED_ORIGINS` 환경변수(콤마 구분)로 설정. 비어있으면 **기본 전체 거부**(origin: false). `credentials`는 사용하지 않음(로그인/쿠키 없음).
-- **헬스체크**: `GET /api/health` — `@nestjs/terminus`의 `TypeOrmHealthIndicator`로 실제 DB 핑(정적 응답 아님).
+- **Swagger**: `SWAGGER_ENABLED` 환경변수로 on/off, **코드 기본값은 `false`**. `/api/docs`에 마운트.
+- **CORS**: 허용 origin은 `ALLOWED_ORIGINS` 환경변수(콤마 구분). 비어있으면 **기본 전체 거부**(origin: false). `credentials` 미사용.
+- **헬스체크**: `GET /api/health` — `@nestjs/terminus`의 `TypeOrmHealthIndicator`로 실제 DB 핑.
 - **브랜치 전략** (정보용): `feature/*` → `dev`(squash) → `main`(merge commit).
+
+### 폐기된 결정 (PRD와 충돌)
+
+- ~~`POST /cards/:id/regenerate`(실시간 재생성)~~ → PRD상 실시간 생성 없음. 미리 만든 표현·예비 이슈로 교체.
+- ~~스몰토크 3개, 카테고리별 최대 5개 이슈, 전체 이슈를 Gemini 1회 호출로 생성~~ → 표현 4개, 카테고리별 4개 이슈(1 + 예비 3), 사실 추출/생성 호출 분리.
+- ~~기존 테이블 초안(`cards`/`articles`/`card_articles`, 2026-11-18)~~ → 사실(fact)·검수·랭킹·예비 이슈 구조가 없으므로 PRD 기준으로 재설계 필요.
 
 ## 미정 사항 (TBD — 임의로 결정하지 말 것)
 
-- **테이블 스키마**: `cards`/`articles`의 구체적인 컬럼, 타입, CHECK 제약, 테이블 간 관계(1카드:N기사 여부 등) — 팀과 재논의 후 확정.
+- **테이블 스키마 재설계**: 이슈/사실/카드/표현/랭킹/관련 기사 테이블 구조.
+- **발췌문 저장 여부**: 수집·사실 추출에는 발췌문을 쓰지만, DB에 저장해도 되는지(저작권)는 미정.
+- **반복 방지 판정 기준**: "최근"의 기간과 "새 전개"를 어떻게 판단할지.
+- **구글 시트 연동 방식**: 인증(서비스 계정 등), 시트 구조(탭·열), 검수 완료를 어떻게 감지할지(08:00 정각 일괄 가져오기 vs 완료 표시 후 트리거).
+- **데이터랩 산정 세부**: 공통 기준 키워드 선택, 요청당 키워드 묶음 크기, 후보 키워드 추출 방법.
+- **공개 API 형태**: 오늘 카드·랭킹 조회 엔드포인트 구조(PRD 기준으로 새로 설계).
 - **스케줄러 방식**: 서버 내부(`@nestjs/schedule`) vs GitHub Actions.
 - **배포 플랫폼**.
-- **Supabase 연결 모드**: direct connection(5432) vs transaction-mode pooler(6543) — 배포 플랫폼이 서버리스로 정해지면 재검토 필요(TypeORM이 의존하는 extended query protocol은 pooler와 충돌할 수 있음).
-- 외부에서 호출 가능한 내부 API를 추가하게 되면, 배포 전 **비밀 키 가드 필수**.
+- **Supabase 연결 모드**: direct connection(5432) vs transaction-mode pooler(6543) — 배포 플랫폼이 서버리스로 정해지면 재검토(TypeORM의 extended query protocol은 pooler와 충돌할 수 있음).
+- 외부에서 호출 가능한 내부 API(파이프라인 수동 실행 등)를 추가하게 되면, 배포 전 **비밀 키 가드 필수**.
